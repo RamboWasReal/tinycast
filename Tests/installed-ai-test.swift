@@ -23,10 +23,12 @@ struct InstalledAITests {
         defer { fixture.tearDown() }
         openCodeCatalogCarriesModelVariants()
         cursorCatalogParsesListModels()
+        grokCatalogParsesListedModels()
         statusJSONRecognizesLogin()
         versionKeepsPrereleaseAndBuild()
         await openCodeRunsWithoutToolsAndDeletesItsSession(fixture)
         await claudeRunsWithoutToolsOrHistory(fixture)
+        await grokRunsWithoutToolsAndDeletesItsSession(fixture)
         await cursorRunsAskModeWithoutForce(fixture)
         await cursorDiscoveryRequiresLoginAndListsModels(fixture)
         await oversizedCompleteFrameFailsTheTurn(fixture)
@@ -127,6 +129,23 @@ struct InstalledAITests {
         fixture.expectPrompt("opencode-prompt.log")
     }
 
+    private static func grokCatalogParsesListedModels() {
+        let output = """
+            You are logged in with grok.com.
+
+            Default model: grok-4.6
+
+            Available models:
+              * grok-4.6 (default)
+              - grok-4.5
+            """
+        let models = InstalledAIModel.grokCatalog(output)
+        expect(models.map(\.id) == ["grok-4.6", "grok-4.5"], "Grok discovery keeps listed model ids")
+        expect(
+            models.first?.efforts.map(\.id) == ["low", "medium", "high", "xhigh"],
+            "Grok models expose the CLI's advertised reasoning efforts")
+    }
+
     private static func claudeRunsWithoutToolsOrHistory(_ fixture: Fixture) async {
         let events = await fixture.events(kind: .claude, model: "sonnet", effort: "xhigh")
         expect(events.contains(.text("Claude reply")), "Claude text reaches the provider stream")
@@ -191,6 +210,31 @@ struct InstalledAITests {
         expect(
             status.models.map(\.id) == ["auto", "composer-2.5"],
             "Cursor discovery keeps the --list-models catalog")
+    }
+
+    private static func grokRunsWithoutToolsAndDeletesItsSession(_ fixture: Fixture) async {
+        let events = await fixture.events(kind: .grok, model: "grok-4.6", effort: "high")
+        expect(events.contains(.text("Grok reply")), "Grok text reaches the provider stream")
+        expect(events.last == .finished, "Grok finishes the provider stream")
+        let arguments = fixture.read("grok-args.log")
+        for flag in [
+            "--prompt-file", "--output-format", "streaming-messages-json",
+            "--include-partial-messages", "--max-turns", "--no-subagents",
+            "--disable-web-search", "--no-plan", "--permission-mode", "dontAsk",
+            "--tools", "--deny", "--disallowed-tools", "--sandbox", "strict", "--verbatim"
+        ] {
+            expect(arguments.contains(flag), "Grok runs with \(flag)")
+        }
+        expect(
+            arguments.contains("--effort") && arguments.contains("high"),
+            "Grok receives the chosen reasoning effort")
+        expect(
+            fixture.read("grok-grok-environment.log").contains("1"),
+            "Grok disables its auto-updater for the turn")
+        let deleted = await fixture.awaitFile("grok-deleted.log", containing: "ses_stub")
+        if !deleted { print("Grok invocations: \(fixture.read("grok-args.log"))") }
+        expect(deleted, "Grok deletes the session created for the reply")
+        fixture.expectPrompt("grok-prompt.log")
     }
 
     /// The CLI rejects a bare `{}` before the turn starts, and a stub argv would never notice.
