@@ -107,6 +107,10 @@ private final class InstalledCLITurnRunner {
                     "Install " + kind.title + " before using this model."))
             return
         }
+        if Task.isCancelled {
+            continuation.finish(throwing: CancellationError())
+            return
+        }
         cancelActiveTurn()
         do {
             try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
@@ -160,6 +164,14 @@ private final class InstalledCLITurnRunner {
         process.terminationHandler = { [self] process in
             let status = process.terminationStatus
             Task { @MainActor in self.didExit(status: status, token: token) }
+        }
+        if Task.isCancelled {
+            stdout.fileHandleForReading.readabilityHandler = nil
+            stderr.fileHandleForReading.readabilityHandler = nil
+            process.terminationHandler = nil
+            if let grokPrompt { try? FileManager.default.removeItem(at: grokPrompt) }
+            continuation.finish(throwing: CancellationError())
+            return
         }
         do {
             try process.run()
