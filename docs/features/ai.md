@@ -78,7 +78,7 @@ depends on neither, and Quick Actions carries its own route rather than borrowin
 - **Claude, Grok, OpenCode and Cursor are text transports, not agents.** Claude runs one turn with no tools,
   browser integration, slash commands or persisted session — but never `--bare`, which reads neither
   OAuth nor the keychain and so refuses the very sign-in this route reuses. Grok runs with `--deny *`,
-  `dontAsk` permissions and a strict sandbox, and never `--always-approve`, so a user's always-approve
+  `dontAsk` permissions and a workspace sandbox, and never `--always-approve`, so a user's always-approve
   config cannot arm tools for this route. OpenCode runs `--pure` with deny-all permissions, disabled
   sharing and a private working directory. Cursor runs `agent -p --mode ask` with `--trust` against
   Tinycast's private workspace and never `--force` / `--yolo` / `--approve-mcps`; ask mode blocks edits.

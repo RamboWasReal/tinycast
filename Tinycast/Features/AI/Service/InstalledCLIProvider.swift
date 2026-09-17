@@ -126,22 +126,24 @@ private final class InstalledCLITurnRunner {
         process.executableURL = executable
         process.currentDirectoryURL = workspace
         process.environment = environment(for: executable)
+        var grokPrompt: URL?
         if kind == .grok {
-            let url = workspace.appending(path: "tinycast-prompt.txt")
+            let url = workspace.appending(path: "tinycast-prompt-\(UUID().uuidString).txt")
             do {
-                try Data(prompt.utf8).write(to: url)
+                try await Self.writePromptFile(prompt, to: url)
             } catch {
+                try? FileManager.default.removeItem(at: url)
                 continuation.finish(
                     throwing: AIProviderError.unavailable(
                         "Tinycast could not write its private AI prompt."))
                 return
             }
-            promptFileURL = url
+            grokPrompt = url
             process.standardInput = FileHandle.nullDevice
         } else {
             process.standardInput = stdin
         }
-        process.arguments = arguments
+        process.arguments = arguments(promptFile: grokPrompt)
         process.standardOutput = stdout
         process.standardError = stderr
         stdout.fileHandleForReading.readabilityHandler = { [weak self] handle in
@@ -165,11 +167,13 @@ private final class InstalledCLITurnRunner {
             stdout.fileHandleForReading.readabilityHandler = nil
             stderr.fileHandleForReading.readabilityHandler = nil
             process.terminationHandler = nil
+            if let grokPrompt { try? FileManager.default.removeItem(at: grokPrompt) }
             continuation.finish(
                 throwing: AIProviderError.responseFailed(
                     kind.title + " could not start: " + error.localizedDescription))
             return
         }
+        promptFileURL = grokPrompt
         self.process = process
         activeExecutable = executable
         self.token = token
@@ -183,7 +187,13 @@ private final class InstalledCLITurnRunner {
         }
     }
 
-    private var arguments: [String] {
+    nonisolated private static func writePromptFile(_ prompt: String, to url: URL) async throws {
+        try await Task.detached {
+            try Data(prompt.utf8).write(to: url)
+        }.value
+    }
+
+    private func arguments(promptFile: URL? = nil) -> [String] {
         switch kind {
         case .claude:
             var result = [
@@ -217,7 +227,7 @@ private final class InstalledCLITurnRunner {
             return result
         case .grok:
             var result = [
-                "--prompt-file", promptFileURL?.path ?? "",
+                "--prompt-file", promptFile?.path ?? "",
                 "--output-format", "streaming-messages-json",
                 "--include-partial-messages",
                 "--model", model,
@@ -229,7 +239,8 @@ private final class InstalledCLITurnRunner {
                 "--tools", "",
                 "--deny", "*",
                 "--disallowed-tools", "Agent",
-                "--sandbox", "strict",
+                // strict refuses to start if /var/run/docker.sock is a symlink.
+                "--sandbox", "workspace",
                 "--verbatim",
                 "--cwd", workspace.path,
                 "--rules", Self.safetyInstructions
@@ -372,6 +383,14 @@ private final class InstalledCLITurnRunner {
         process?.terminate()
         outputBuffer.removeAll(keepingCapacity: false)
         errorBuffer.removeAll(keepingCapacity: false)
+        removePromptFile()
+    }
+
+    private func removePromptFile() {
+        if let promptFileURL {
+            try? FileManager.default.removeItem(at: promptFileURL)
+        }
+        promptFileURL = nil
     }
 
     private func deleteTurnSession() {
@@ -444,10 +463,7 @@ private final class InstalledCLITurnRunner {
         outputBuffer.removeAll(keepingCapacity: false)
         errorBuffer.removeAll(keepingCapacity: false)
         turnSessionID = nil
-        if let promptFileURL {
-            try? FileManager.default.removeItem(at: promptFileURL)
-        }
-        promptFileURL = nil
+        removePromptFile()
         activeExecutable = nil
     }
 }

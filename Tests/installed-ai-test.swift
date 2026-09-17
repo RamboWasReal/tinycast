@@ -216,17 +216,24 @@ struct InstalledAITests {
         let events = await fixture.events(kind: .grok, model: "grok-4.6", effort: "high")
         expect(events.contains(.text("Grok reply")), "Grok text reaches the provider stream")
         expect(events.last == .finished, "Grok finishes the provider stream")
-        let arguments = fixture.read("grok-args.log")
+        let argv = fixture.arguments("grok-args.log")
         for flag in [
             "--prompt-file", "--output-format", "streaming-messages-json",
             "--include-partial-messages", "--max-turns", "--no-subagents",
             "--disable-web-search", "--no-plan", "--permission-mode", "dontAsk",
-            "--tools", "--deny", "--disallowed-tools", "--sandbox", "strict", "--verbatim"
+            "--tools", "--deny", "--disallowed-tools", "--sandbox", "workspace", "--verbatim"
         ] {
-            expect(arguments.contains(flag), "Grok runs with \(flag)")
+            expect(argv.contains(flag), "Grok runs with \(flag)")
+        }
+        if let index = argv.firstIndex(of: "--prompt-file"), index + 1 < argv.count {
+            let name = URL(fileURLWithPath: argv[index + 1]).lastPathComponent
+            expect(
+                name.hasPrefix("tinycast-prompt-") && name.hasSuffix(".txt")
+                    && name != "tinycast-prompt.txt",
+                "Grok prompt file is unique per turn")
         }
         expect(
-            arguments.contains("--effort") && arguments.contains("high"),
+            argv.contains("--effort") && argv.contains("high"),
             "Grok receives the chosen reasoning effort")
         expect(
             fixture.read("grok-grok-environment.log").contains("1"),
